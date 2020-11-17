@@ -1,0 +1,17 @@
+{
+    "files.associations": {
+        "algorithm": "c",
+        "functional": "c",
+        "__cxx_version": "c",
+        "__hash_table": "c",
+        "bitset": "c",
+        "locale": "c",
+        "sstream": "c",
+        "type_traits": "c",
+        "complex": "c",
+        "ostream": "c",
+        "__config": "c",
+        "atomic": "c",
+        "new": "c"
+    }
+}
