@@ -1,0 +1,10 @@
+
+lev3.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <.text>:
+   0:	68 7e 1a 40 00       	pushq  $0x401a7e
+   5:	bf 88 ea 66 55       	mov    $0x5566ea88,%edi
+   a:	c3                   	retq   
