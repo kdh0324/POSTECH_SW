@@ -254,6 +254,14 @@ void do_bgfg(char **argv) {
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid) {
+    struct job_t *p_job = getjobpid(jobs, pid);
+    if (p_job == NULL)
+        return;
+    while (p_job->state == FG) {
+        sleep(1);
+    }
+    if(verbose == 1)
+        printf("waitfg: Process (%d) no longer the fg process\n", pid);
     return;
 }
 
