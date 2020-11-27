@@ -2,6 +2,8 @@
  * tsh - A tiny shell program with job control
  * 
  * <Put your name and login ID here>
+ * name: Daeho Kim
+ * login ID: kdh0324
  */
 #include <stdio.h>
 #include <stdlib.h>
