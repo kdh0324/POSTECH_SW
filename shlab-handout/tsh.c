@@ -327,17 +327,17 @@ void sigchld_handler(int sig) {
  *    to the foreground job.  
  */
 void sigint_handler(int sig) {
-    if (verbose)
+    if (verbose == 1)
         printf("sigint_handler: entering\n");
 
     pid_t pid = fgpid(jobs);
     if (pid != 0) {
         kill(pid, sig);
-        if (verbose)
+        if (verbose == 1)
             printf("sigint_handler: Job (%d) killed\n", pid);
     }
-    
-    if (verbose)
+
+    if (verbose == 1)
         printf("sigint_handler: exiting\n");
     return;
 }
@@ -348,6 +348,20 @@ void sigint_handler(int sig) {
  *     foreground job by sending it a SIGTSTP.  
  */
 void sigtstp_handler(int sig) {
+    if (verbose == 1)
+        printf("sigtstp_handler: entering\n");
+
+    pid_t pid = fgpid(jobs);
+    if (pid != 0) {
+        kill(pid, sig);
+        if (verbose == 1) {
+            struct job_t *job = getjobpid(jobs, pid);
+            printf("sigtstp_handler: Job [%d] (%d) stopped\n", job->jid, pid);
+        }
+    }
+    if (verbose == 1)
+        printf("sigtstp_handler: exiting\n");
+
     return;
 }
 
