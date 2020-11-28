@@ -164,6 +164,30 @@ int main(int argc, char **argv) {
  * when we type ctrl-c (ctrl-z) at the keyboard.  
 */
 void eval(char *cmdline) {
+    char *argv[MAXARGS];
+    bool isBG = parseline(cmdline, argv);
+
+    if (builtin_cmd(argv) == 0) {
+        int pid = fork();
+        if (pid == -1) {
+            printf("error\n");
+            return;
+        }
+        if (pid == 0) {
+            execve(argv[0], argv, environ);
+            return;
+        }
+
+        if (isBG) {
+            addjob(jobs, pid, BG, cmdline);
+            struct job_t *job = getjobpid(jobs, pid);
+            printf("[%d] (%d) %s\n", job->jid, pid, cmdline);
+        } else {
+            addjob(jobs, pid, FG, cmdline);
+            waitfg(pid);
+        }
+    }
+
     return;
 }
 
@@ -228,15 +252,15 @@ int parseline(const char *cmdline, char **argv) {
 int builtin_cmd(char **argv) {
     if (argv[0] == NULL)
         return 1;
-    if (!strcmp("quit", argv[0])) {
+    if (strcmp("quit", argv[0]) == 0) {
         exit(0);
         return 1;
     }
-    if (!strcmp("jobs", argv[0])) {
+    if (strcmp("jobs", argv[0]) == 0) {
         listjobs(jobs);
         return 1;
     }
-    if (!(strcmp("bg", argv[0]) && strcmp("fg", argv[0]))) {
+    if (strcmp("bg", argv[0]) == 0 || strcmp("fg", argv[0]) == 0) {
         do_bgfg(argv);
         return 1;
     }
@@ -260,7 +284,7 @@ void do_bgfg(char **argv) {
             return;
         }
 
-        job = getjobjid(jid, jobs);
+        job = getjobjid(jobs, jid);
         if (job == NULL) {
             printf("%%%d: No such job\n", jid);
             return;
@@ -272,7 +296,7 @@ void do_bgfg(char **argv) {
             return;
         }
 
-        job = getjobpid(pid, jobs);
+        job = getjobpid(jobs, pid);
         if (job == NULL) {
             printf("(%d:) No such process\n", pid);
             return;
