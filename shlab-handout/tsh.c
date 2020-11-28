@@ -279,7 +279,11 @@ void do_bgfg(char **argv) {
         }
     }
 
-    kill(job->pid, SIGCONT);
+    if (kill(job->pid, SIGCONT) == -1) {
+        printf("error\n");
+        return;
+    }
+
     if (strcmp("fg", argv[0]) == 0) {
         job->state = FG;
         waitfg(job->pid);
@@ -332,7 +336,10 @@ void sigint_handler(int sig) {
 
     pid_t pid = fgpid(jobs);
     if (pid != 0) {
-        kill(pid, sig);
+        if (kill(pid, sig) == -1) {
+            printf("sigint_handler: error\n");
+            return;
+        }
         if (verbose == 1)
             printf("sigint_handler: Job (%d) killed\n", pid);
     }
@@ -353,7 +360,10 @@ void sigtstp_handler(int sig) {
 
     pid_t pid = fgpid(jobs);
     if (pid != 0) {
-        kill(pid, sig);
+        if (kill(pid, sig) == -1) {
+            printf("sigstp_handler: error\n");
+            return;
+        }
         if (verbose == 1) {
             struct job_t *job = getjobpid(jobs, pid);
             printf("sigtstp_handler: Job [%d] (%d) stopped\n", job->jid, pid);
