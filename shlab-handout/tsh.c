@@ -247,12 +247,12 @@ int builtin_cmd(char **argv) {
  * do_bgfg - Execute the builtin bg and fg commands
  */
 void do_bgfg(char **argv) {
-    if (!argv[1])  {
+    if (!argv[1]) {
         printf("%s command requires PID or %%jobid argument\n", argv[0]);
         return;
     }
 
-    struct job_t* job;
+    struct job_t *job;
     if (argv[1][0] == '%') {
         int jid = atoi(&argv[1][1]);
         if (jid == 0) {
@@ -301,7 +301,7 @@ void waitfg(pid_t pid) {
     while (p_job->state == FG) {
         sleep(1);
     }
-    if(verbose == 1)
+    if (verbose == 1)
         printf("waitfg: Process (%d) no longer the fg process\n", pid);
     return;
 }
@@ -327,6 +327,18 @@ void sigchld_handler(int sig) {
  *    to the foreground job.  
  */
 void sigint_handler(int sig) {
+    if (verbose)
+        printf("sigint_handler: entering\n");
+
+    pid_t pid = fgpid(jobs);
+    if (pid != 0) {
+        kill(pid, sig);
+        if (verbose)
+            printf("sigint_handler: Job (%d) killed\n", pid);
+    }
+    
+    if (verbose)
+        printf("sigint_handler: exiting\n");
     return;
 }
 
