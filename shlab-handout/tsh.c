@@ -410,6 +410,7 @@ void sigint_handler(int sig) {
     if (pid != 0) {
         if (kill(pid, sig) == -1) {
             printf("sigint_handler: error\n");
+            exit(0);
             return;
         }
         if (verbose == 1)
@@ -434,6 +435,7 @@ void sigtstp_handler(int sig) {
     if (pid != 0) {
         if (kill(pid, sig) == -1) {
             printf("sigstp_handler: error\n");
+            exit(0);
             return;
         }
         if (verbose == 1) {
