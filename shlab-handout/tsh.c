@@ -166,29 +166,35 @@ int main(int argc, char **argv) {
 void eval(char *cmdline) {
     char *argv[MAXARGS];
     bool isBG = parseline(cmdline, argv);
-    if (argv[0] == NULL)
+    if (argv[0] == NULL || builtin_cmd(argv) == 1)
         return;
 
-    if (builtin_cmd(argv) == 0) {
-        int pid = fork();
-        if (pid == -1) {
-            printf("error\n");
-            return;
-        }
-        if (pid == 0) {
-            execve(argv[0], argv, environ);
-            return;
-        }
+    sigset_t mask;
+    if (sigemptyset(&mask) == -1 || sigaddset(&mask, SIGCHLD) == -1 || sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
+        printf("error\n");
 
-        if (isBG) {
-            addjob(jobs, pid, BG, cmdline);
-            struct job_t *job = getjobpid(jobs, pid);
-            printf("[%d] (%d) %s\n", job->jid, pid, cmdline);
-        } else {
-            addjob(jobs, pid, FG, cmdline);
-            waitfg(pid);
-        }
+    int pid = fork();
+    if (pid == -1) {
+        printf("error\n");
+        return;
     }
+    if (pid == 0) {
+        if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1 || execve(argv[0], argv, environ) == -1)
+            printf("error\n");
+        return;
+    }
+
+    if (isBG) {
+        addjob(jobs, pid, BG, cmdline);
+        struct job_t *job = getjobpid(jobs, pid);
+        printf("[%d] (%d) %s\n", job->jid, pid, cmdline);
+    } else {
+        addjob(jobs, pid, FG, cmdline);
+        waitfg(pid);
+    }
+
+    if(sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1)
+        printf("error\n");
 
     return;
 }
