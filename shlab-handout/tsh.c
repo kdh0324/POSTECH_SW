@@ -185,7 +185,6 @@ void eval(char *cmdline) {
         if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1) {
             printf("error");
             exit(0);
-            return;
         }
         if (execve(argv[0], argv, environ) == -1) {
             printf("%s: Command not found\n", argv[0]);
@@ -198,14 +197,12 @@ void eval(char *cmdline) {
         addjob(jobs, pid, BG, cmdline);
         struct job_t *job = getjobpid(jobs, pid);
         printf("[%d] (%d) %s", job->jid, pid, cmdline);
-    } else {
+    } else
         addjob(jobs, pid, FG, cmdline);
-    }
 
     if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1) {
         printf("error");
         exit(0);
-        return;
     }
     waitfg(pid);
 
@@ -271,10 +268,8 @@ int parseline(const char *cmdline, char **argv) {
  *    it immediately.  
  */
 int builtin_cmd(char **argv) {
-    if (strcmp("quit", argv[0]) == 0) {
+    if (strcmp("quit", argv[0]) == 0)
         exit(0);
-        return 1;
-    }
     if (strcmp("jobs", argv[0]) == 0) {
         listjobs(jobs);
         return 1;
@@ -411,7 +406,6 @@ void sigint_handler(int sig) {
         if (kill(pid, sig) == -1) {
             printf("sigint_handler: error\n");
             exit(0);
-            return;
         }
         if (verbose == 1)
             printf("sigint_handler: Job (%d) killed\n", pid);
@@ -436,7 +430,6 @@ void sigtstp_handler(int sig) {
         if (kill(pid, sig) == -1) {
             printf("sigstp_handler: error\n");
             exit(0);
-            return;
         }
         if (verbose == 1) {
             struct job_t *job = getjobpid(jobs, pid);
