@@ -166,6 +166,8 @@ int main(int argc, char **argv) {
 void eval(char *cmdline) {
     char *argv[MAXARGS];
     bool isBG = parseline(cmdline, argv);
+    if (argv[0] == NULL)
+        return;
 
     if (builtin_cmd(argv) == 0) {
         int pid = fork();
@@ -250,8 +252,6 @@ int parseline(const char *cmdline, char **argv) {
  *    it immediately.  
  */
 int builtin_cmd(char **argv) {
-    if (argv[0] == NULL)
-        return 1;
     if (strcmp("quit", argv[0]) == 0) {
         exit(0);
         return 1;
@@ -271,7 +271,7 @@ int builtin_cmd(char **argv) {
  * do_bgfg - Execute the builtin bg and fg commands
  */
 void do_bgfg(char **argv) {
-    if (!argv[1]) {
+    if (argv[1] == NULL) {
         printf("%s command requires PID or %%jobid argument\n", argv[0]);
         return;
     }
@@ -298,7 +298,7 @@ void do_bgfg(char **argv) {
 
         job = getjobpid(jobs, pid);
         if (job == NULL) {
-            printf("(%d:) No such process\n", pid);
+            printf("(%d): No such process\n", pid);
             return;
         }
     }
@@ -323,11 +323,12 @@ void do_bgfg(char **argv) {
  * waitfg - Block until process pid is no longer the foreground process
  */
 void waitfg(pid_t pid) {
-    struct job_t *p_job = getjobpid(jobs, pid);
-    if (p_job == NULL)
-        return;
-    while (p_job->state == FG) {
-        sleep(1);
+    struct job_t *job = getjobpid(jobs, pid);
+    sigset_t mask;
+    if (sigemptyset(&mask) == -1)
+        printf("error\n");
+    while (job != NULL && job->state == FG) {
+        sigsuspend(&mask);
     }
     if (verbose == 1)
         printf("waitfg: Process (%d) no longer the fg process\n", pid);
@@ -393,9 +394,9 @@ void sigtstp_handler(int sig) {
             printf("sigtstp_handler: Job [%d] (%d) stopped\n", job->jid, pid);
         }
     }
+
     if (verbose == 1)
         printf("sigtstp_handler: exiting\n");
-
     return;
 }
 
