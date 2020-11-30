@@ -101,20 +101,22 @@ test:
 	for i in $(NUMBER); do \
 		chmod +x sdriver.pl; \
 		echo Test trace$$i...; \
-		# make rtest$$i > expected; \
-		# make test$$i > actual; \
-		# diff expected actual > result; \
-		diff <(make rtest$$i) <(make test$$i) > result; \
+		make rtest$$i > expected; \
+		make test$$i > actual; \
+		sed -i 's/[0-9]*//g' expected; \
+		sed -i 's/[0-9]*//g' actual; \
+		diff expected actual > result; \
 		sed -i '1d' result; \
 		sed -i '/---/d' result; \
 		sed -i '/sdriver/d' result; \
+		sed -i '/tsh/d' result; \
 		if [ -s "result" ]; then \
 			let "wrong += 1"; \
 			echo Failed; \
 		else \
 			echo Succeed; \
 		fi; \
-		# rm expected actual; \
+		rm expected actual; \
     done; \
 	echo "WRONG: $$wrong"; \
 	rm result;
@@ -122,5 +124,3 @@ test:
 # clean up
 clean:
 	rm -f $(FILES) *.o *~
-
-
