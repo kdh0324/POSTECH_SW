@@ -1,6 +1,5 @@
 # Makefile for the CS:APP Shell Lab
 
-SHELL := /bin/bash
 TEAM = NOBODY
 VERSION = 1
 HANDINDIR = /afs/cs/academic/class/15213-f02/L5/handin
@@ -95,11 +94,10 @@ rtest16:
 
 # Compare the tests between student's & reference shell program
 PRINT = $(shell printf 'trace%02d is wrong.' $(number))
-NUMBER = 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16
+NUMBER = 01 02 03 04 05 06 07 08 09 10 14 15 16
 test:
 	@wrong = 0; \
 	for i in $(NUMBER); do \
-		chmod +x sdriver.pl; \
 		echo Test trace$$i...; \
 		make rtest$$i > expected; \
 		make test$$i > actual; \
