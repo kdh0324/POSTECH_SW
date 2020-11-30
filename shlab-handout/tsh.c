@@ -170,31 +170,44 @@ void eval(char *cmdline) {
         return;
 
     sigset_t mask;
-    if (sigemptyset(&mask) == -1 || sigaddset(&mask, SIGCHLD) == -1 || sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
-        printf("error\n");
+    if (sigemptyset(&mask) == -1 || sigaddset(&mask, SIGCHLD) == -1 || sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+        printf("error");
+        return;
+    }
 
     int pid = fork();
     if (pid == -1) {
-        printf("error\n");
+        printf("error");
         return;
     }
     if (pid == 0) {
-        if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1 || execve(argv[0], argv, environ) == -1)
-            printf("error\n");
+        setpgid(0, 0);
+        if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1) {
+            printf("error");
+            exit(0);
+            return;
+        }
+        if (execve(argv[0], argv, environ) == -1) {
+            printf("%s: Command not found\n", argv[0]);
+            exit(0);
+        }
         return;
     }
 
     if (isBG) {
         addjob(jobs, pid, BG, cmdline);
         struct job_t *job = getjobpid(jobs, pid);
-        printf("[%d] (%d) %s\n", job->jid, pid, cmdline);
+        printf("[%d] (%d) %s", job->jid, pid, cmdline);
     } else {
         addjob(jobs, pid, FG, cmdline);
-        waitfg(pid);
     }
 
-    if(sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1)
-        printf("error\n");
+    if (sigprocmask(SIG_UNBLOCK, &mask, NULL) == -1) {
+        printf("error");
+        exit(0);
+        return;
+    }
+    waitfg(pid);
 
     return;
 }
@@ -319,7 +332,7 @@ void do_bgfg(char **argv) {
         waitfg(job->pid);
     } else {
         job->state = BG;
-        printf("[%d] (%d) %s\n", job->jid, job->pid, job->cmdline);
+        printf("[%d] (%d) %s", job->jid, job->pid, job->cmdline);
     }
 
     return;
@@ -353,6 +366,34 @@ void waitfg(pid_t pid) {
  *     currently running children to terminate.  
  */
 void sigchld_handler(int sig) {
+    pid_t pid;
+    int status;
+
+    while ((pid = waitpid(-1, &status, WNOHANG | WUNTRACED)) > 0) {
+        struct job_t *job = getjobpid(jobs, pid);
+        if (job == NULL) {
+            printf("error");
+            exit(0);
+        }
+
+        if (WIFSTOPPED(status)) {
+            job->state = ST;
+            printf("Job [%d] (%d) stopped by signal %d\n", pid2jid(pid), pid, SIGTSTP);
+        } else if (WIFSIGNALED(status)) {
+            if (verbose == 1)
+                printf("sigchld_handler: Job [%d] (%d) deleted\n", job->jid, job->pid);
+            printf("Job [%d] (%d) terminated by signal %d\n", job->jid, job->pid, WTERMSIG(status));
+            deletejob(jobs, pid);
+        } else {
+            if (verbose == 1)
+                printf("sigchld_handler: Job [%d] (%d) deleted\n", job->jid, job->pid);
+            deletejob(jobs, pid);
+        }
+    }
+
+    if (verbose == 1)
+        printf("sigchld_handler: exiting\n");
+
     return;
 }
 
