@@ -46,18 +46,52 @@
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
 /* Given block ptr bp, compute address of its header and footer */
-#define HDRP(bp) ((char *)(bp) - WSIZE)
+#define HDRP(bp) ((char *)(bp)-WSIZE)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
 /* Given block ptr bp, compute address of next and previous blocks */
-#define NEXT_BLKP(bp) (char *)(bp) + GET_SIZE(((char *)(bp))) - WSIZE)
-#define PREV_BLKP(bp) (char *)(bp) + GET_SIZE(((char *)(bp))) - DSIZE)
+#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp))) - WSIZE)
+#define PREV_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp))) - DSIZE)
+
+void *heap_listp = 0;
 
 /* 
  * mm_init - initialize the malloc package.
+ * 
+ * return 0 if successful and -1 otherwise.
  */
 int mm_init(void) {
+    /* Create the initial empty heap */
+    if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
+        return -1;
+    PUT(heap_listp, 0);
+    PUT(heap_listp + WSIZE, PACK(DSIZE, 1));
+    PUT(heap_listp + 2 * WSIZE, PACK(DSIZE, 1));
+    PUT(heap_listp + 3 * WSIZE, PACK(0, 1));
+    heap_listp += 2 * WSIZE;
+
+    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+        return -1;
     return 0;
+}
+
+static void *extend_heap(size_t words) {
+    char *bp;
+    size_t size;
+
+    /* Allocate an even number of words to maintain alignment */
+    size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
+    if ((long)(bp = mem_sbrk(size)) == -1)
+        return NULL;
+
+    /* Initialize free block header/footer and the epilogue header */
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
+
+    /* Coalesce if the previous block was free */
+    return coalesce(bp);
 }
 
 /* 
@@ -79,6 +113,32 @@ void *mm_malloc(size_t size) {
  * mm_free - Freeing a block does nothing.
  */
 void mm_free(void *ptr) {
+    size_t size = GET_SIZE(HDRP(ptr));
+
+    PUT(HDRP(ptr), PACK(size, 0));
+    PUT(FTRP(ptr), PACK(size, 0));
+    coalesce(ptr);
+}
+
+static void *coalesce(void *ptr) {
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(ptr)));
+    size_t next_alloc = GET_ALLOC(HDRP(PREV_BLKP(ptr)));
+    size_t size = GET_SIZE(HDRP(ptr));
+
+    if (prev_alloc && next_alloc)
+        return ptr;
+
+    else if (prev_alloc && !next_alloc) {
+        size += GET_SIZE(HDRP(PREV_BLKP(ptr)));
+        PUT(FTRP(ptr), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(ptr)), PACK(size, 0));
+    } else {
+        size += GET_SIZE(HDRP(PREV_BLKP(ptr))) + GET_SIZE(FTRP(NEXT_BLKP(ptr)));
+        PUT(HDRP(PREV_BLKP(ptr)), PACK(size, 0));
+        PUT(FTRP(PREV_BLKP(ptr)), PACK(size, 0));
+    }
+    ptr = PREV_BLKP(ptr);
+    return ptr;
 }
 
 /*
