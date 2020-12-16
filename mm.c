@@ -1,3 +1,4 @@
+
 /*
  * mm-naive.c - The fastest, least memory-efficient malloc package.
  * 
@@ -25,16 +26,17 @@
 /* rounds up to the nearest multiple of ALIGNMENT */
 #define ALIGN(size) (((size) + (ALIGNMENT - 1)) & ~0x7)
 
-#define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
+/* Basic constatns and macros */
+#define WSIZE 4             /* Word and header/footer size (bytes) */
+#define DSIZE 8             /* Double word size (bytes) */
+#define CHUNKSIZE (1 << 12) /* Extend heap by this amout (bytes) */
 
-/* Basic constants and macros */
-#define WSIZE 4
-#define DSIZE 8
-#define CHUNKSIZE (1 << 12) /* Extend heap by this amount (bytes) */
+/* Segregated list size */
+#define LIST_SIZE 20
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
-/* Pack a size and allocatd bit into a word */
+/* Pack a size and allocated bit into a word */
 #define PACK(size, alloc) ((size) | (alloc))
 
 /* Read and write a word at address p */
@@ -46,52 +48,196 @@
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
 /* Given block ptr bp, compute address of its header and footer */
-#define HDRP(bp) ((char *)(bp)-WSIZE)
-#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+#define HDRP(ptr) ((char *)(ptr)-WSIZE)
+#define FTRP(ptr) ((char *)(ptr) + GET_SIZE(HDRP(ptr)) - DSIZE)
 
 /* Given block ptr bp, compute address of next and previous blocks */
-#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp))) - WSIZE)
-#define PREV_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp))) - DSIZE)
+#define NEXT_BLKP(ptr) ((char *)(ptr) + GET_SIZE((char *)(ptr)-WSIZE))
+#define PREV_BLKP(ptr) ((char *)(ptr)-GET_SIZE((char *)(ptr)-DSIZE))
 
-void *heap_listp = 0;
+/* Forward/Back pointers which stored in free block */
+#define GET_PREV(ptr) ((char *)(ptr))
+#define GET_NEXT(ptr) ((char *)(ptr) + WSIZE)
 
-/* 
- * mm_init - initialize the malloc package.
- * 
- * return 0 if successful and -1 otherwise.
- */
-int mm_init(void) {
-    /* Create the initial empty heap */
-    if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
-        return -1;
-    PUT(heap_listp, 0);
-    PUT(heap_listp + WSIZE, PACK(DSIZE, 1));
-    PUT(heap_listp + 2 * WSIZE, PACK(DSIZE, 1));
-    PUT(heap_listp + 3 * WSIZE, PACK(0, 1));
-    heap_listp += 2 * WSIZE;
+/* Adjacent node in segregated list */
+#define PREV_NODE(ptr) (*(char **)(ptr))
+#define NEXT_NODE(ptr) (*(char **)(GET_NEXT(ptr)))
 
-    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
-        return -1;
-    return 0;
+/* Set pointer */
+#define SET_PTR(p, ptr) (*(unsigned int *)(p) = (unsigned int)(ptr))
+
+/* Segregated list */
+void *segregated_free_list[LIST_SIZE];
+
+static void *extend_heap(size_t size);
+static void *coalesce(void *);
+static void *place(void *, size_t);
+static void pushNode(void *, size_t);
+static void popNode(void *);
+inline size_t getSize(size_t);
+static void *realloc_coalesce(void *, size_t);
+
+/* Get size which append offset */
+inline size_t getSize(size_t size) {
+    if (size < DSIZE)
+        return 2 * DSIZE;
+    return ALIGN(size + DSIZE);
 }
 
-static void *extend_heap(size_t words) {
-    char *bp;
-    size_t size;
+static void *extend_heap(size_t size) {
+    void *ptr;
 
     /* Allocate an even number of words to maintain alignment */
-    size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
-    if ((long)(bp = mem_sbrk(size)) == -1)
+    size = ALIGN(size);
+    if ((ptr = mem_sbrk(size)) == (void *)-1)
         return NULL;
 
     /* Initialize free block header/footer and the epilogue header */
-    PUT(HDRP(bp), PACK(size, 0));
-    PUT(FTRP(bp), PACK(size, 0));
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
+    PUT(HDRP(ptr), PACK(size, 0));         /* Free block header */
+    PUT(FTRP(ptr), PACK(size, 0));         /* Free block footer */
+    PUT(HDRP(NEXT_BLKP(ptr)), PACK(0, 1)); /* New epilogue header */
+    pushNode(ptr, size);
 
-    /* Coalesce if the previous block was free */
-    return coalesce(bp);
+    /* Coalesce if the adjacent blocks were free */
+    return coalesce(ptr);
+}
+
+/* Push pointer in segregated list */
+static void pushNode(void *ptr, size_t size) {
+    /* Find index of list */
+    int i = 0;
+    for (; i < LIST_SIZE - 1; i++) {
+        size >>= 1;
+    }
+
+    /* Find position in set of list */
+    void *preNode = segregated_free_list[i];
+    void *node = NULL;
+    while ((preNode != NULL) && (size > GET_SIZE(HDRP(preNode)))) {
+        node = preNode;
+        preNode = PREV_NODE(preNode);
+    }
+
+    /* Link adjacent nodes */
+    SET_PTR(GET_PREV(ptr), preNode);
+    SET_PTR(GET_NEXT(ptr), node);
+    if (preNode != NULL)
+        SET_PTR(GET_NEXT(preNode), ptr);
+    if (node != NULL) {
+        SET_PTR(GET_NEXT(ptr), node);
+        SET_PTR(GET_PREV(node), ptr);
+    } else {
+        SET_PTR(GET_PREV(ptr), preNode);
+        segregated_free_list[i] = ptr;
+    }
+
+    return;
+}
+
+/* Pop node to allocate */
+static void popNode(void *ptr) {
+    size_t size = GET_SIZE(HDRP(ptr));
+
+    if (PREV_NODE(ptr) != NULL)
+        SET_PTR(GET_NEXT(PREV_NODE(ptr)), NEXT_NODE(ptr));
+    if (NEXT_NODE(ptr) != NULL)
+        SET_PTR(GET_PREV(NEXT_NODE(ptr)), PREV_NODE(ptr));
+    else {
+        int i = 0;
+        for (; i < LIST_SIZE - 1; i++) {
+            size >>= 1;
+        }
+
+        segregated_free_list[i] = PREV_NODE(ptr);
+    }
+
+    return;
+}
+
+/* Merge adjacent nodes in list */
+static void *coalesce(void *ptr) {
+    size_t prev_alloc = GET_ALLOC(HDRP(PREV_BLKP(ptr)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(ptr)));
+    size_t size = GET_SIZE(HDRP(ptr));
+
+    if (prev_alloc && next_alloc)
+        return ptr;
+
+    popNode(ptr);
+    if (prev_alloc && !next_alloc) {
+        popNode(NEXT_BLKP(ptr));
+
+        size += GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+        PUT(HDRP(ptr), PACK(size, 0));
+        PUT(FTRP(ptr), PACK(size, 0));
+    } else if (!prev_alloc && next_alloc) {
+        popNode(PREV_BLKP(ptr));
+
+        size += GET_SIZE(HDRP(PREV_BLKP(ptr)));
+        PUT(FTRP(ptr), PACK(size, 0));
+        ptr = PREV_BLKP(ptr);
+        PUT(HDRP(ptr), PACK(size, 0));
+    } else {
+        popNode(PREV_BLKP(ptr));
+        popNode(NEXT_BLKP(ptr));
+
+        size += GET_SIZE(HDRP(PREV_BLKP(ptr))) + GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+        PUT(FTRP(NEXT_BLKP(ptr)), PACK(size, 0));
+        ptr = PREV_BLKP(ptr);
+        PUT(HDRP(ptr), PACK(size, 0));
+    }
+
+    pushNode(ptr, size);
+
+    return ptr;
+}
+
+/* Split a node to allocate */
+static void *place(void *ptr, size_t size) {
+    size_t nodeSize = GET_SIZE(HDRP(ptr));
+    size_t newSize = nodeSize - size;
+
+    popNode(ptr);
+
+    if (newSize <= DSIZE * 2) {
+        PUT(HDRP(ptr), PACK(nodeSize, 1));
+        PUT(FTRP(ptr), PACK(nodeSize, 1));
+    } else {
+        PUT(HDRP(ptr), PACK(size, 1));
+        PUT(FTRP(ptr), PACK(size, 1));
+        PUT(HDRP(NEXT_BLKP(ptr)), PACK(newSize, 0));
+        PUT(FTRP(NEXT_BLKP(ptr)), PACK(newSize, 0));
+        pushNode(NEXT_BLKP(ptr), newSize);
+    }
+    return ptr;
+}
+
+/* 
+ * mm_init - initialize the malloc package.
+ */
+int mm_init(void) {
+    char *heap_start;
+
+    /* Initialize segregated list */
+    int i;
+    for (i = 0; i < LIST_SIZE; i++) {
+        segregated_free_list[i] = NULL;
+    }
+
+    /* Create the initial empty heap */
+    if ((heap_start = mem_sbrk(4 * WSIZE)) == (void *)-1)
+        return -1;
+
+    PUT(heap_start, 0);                            /* Alignment padding */
+    PUT(heap_start + WSIZE, PACK(DSIZE, 1));       /* Prologue header */
+    PUT(heap_start + (2 * WSIZE), PACK(DSIZE, 1)); /* Prologue footer */
+    PUT(heap_start + (3 * WSIZE), PACK(0, 1));     /* Epilogue header */
+
+    /* Extend the empty heap with a free block of CHUNKSIZE bytes */
+    if (extend_heap(CHUNKSIZE / DSIZE) == NULL)
+        return -1;
+
+    return 0;
 }
 
 /* 
@@ -99,14 +245,31 @@ static void *extend_heap(size_t words) {
  *     Always allocate a block whose size is a multiple of the alignment.
  */
 void *mm_malloc(size_t size) {
-    int newsize = ALIGN(size + SIZE_T_SIZE);
-    void *p = mem_sbrk(newsize);
-    if (p == (void *)-1)
+    if (size == 0)
         return NULL;
-    else {
-        *(size_t *)p = size;
-        return (void *)((char *)p + SIZE_T_SIZE);
+
+    size = getSize(size);
+
+    void *node = NULL;
+    int i = 0;
+    size_t temp = size;
+    for (; i < LIST_SIZE; i++) {
+        if (segregated_free_list[i] != NULL && temp <= 1) { /* Find fit node set in list */
+            node = segregated_free_list[i];
+            while (node != NULL && size > GET_SIZE(HDRP(node))) { /* If there is no node size to allocate, pass to next set */
+                node = PREV_NODE(node);
+            }
+            if (node != NULL)
+                return place(node, size);
+        }
+        temp >>= 1;
     }
+
+    // if free block is not found, extend the heap
+    if ((node = extend_heap(MAX(size, CHUNKSIZE))) == NULL)
+        return NULL;
+
+    return place(node, size);
 }
 
 /*
@@ -114,48 +277,82 @@ void *mm_malloc(size_t size) {
  */
 void mm_free(void *ptr) {
     size_t size = GET_SIZE(HDRP(ptr));
-
     PUT(HDRP(ptr), PACK(size, 0));
     PUT(FTRP(ptr), PACK(size, 0));
+
+    pushNode(ptr, size);
+
     coalesce(ptr);
+    return;
 }
 
-static void *coalesce(void *ptr) {
+/* Merge adjacent nodes in list when reallocating */
+static void *realloc_coalesce(void *ptr, size_t newSize) {
     size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(ptr)));
-    size_t next_alloc = GET_ALLOC(HDRP(PREV_BLKP(ptr)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(ptr)));
     size_t size = GET_SIZE(HDRP(ptr));
 
-    if (prev_alloc && next_alloc)
-        return ptr;
-
-    else if (prev_alloc && !next_alloc) {
+    if (prev_alloc && !next_alloc) {
+        size += GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+        if (size >= newSize) {
+            popNode(NEXT_BLKP(ptr));
+            PUT(HDRP(ptr), PACK(size, 1));
+            PUT(FTRP(ptr), PACK(size, 1));
+            return ptr;
+        }
+    } else if (!prev_alloc && next_alloc) {
         size += GET_SIZE(HDRP(PREV_BLKP(ptr)));
-        PUT(FTRP(ptr), PACK(size, 0));
-        PUT(HDRP(PREV_BLKP(ptr)), PACK(size, 0));
-    } else {
-        size += GET_SIZE(HDRP(PREV_BLKP(ptr))) + GET_SIZE(FTRP(NEXT_BLKP(ptr)));
-        PUT(HDRP(PREV_BLKP(ptr)), PACK(size, 0));
-        PUT(FTRP(PREV_BLKP(ptr)), PACK(size, 0));
+        if (size >= newSize) {
+            popNode(PREV_BLKP(ptr));
+            PUT(FTRP(ptr), PACK(size, 1));
+            PUT(HDRP(PREV_BLKP(ptr)), PACK(size, 1));
+            ptr = PREV_BLKP(ptr);
+            return ptr;
+        }
+    } else if (!prev_alloc && !next_alloc) {
+        size += GET_SIZE(FTRP(NEXT_BLKP(ptr))) + GET_SIZE(HDRP(PREV_BLKP(ptr)));
+        if (size >= newSize) {
+            popNode(PREV_BLKP(ptr));
+            popNode(NEXT_BLKP(ptr));
+            PUT(FTRP(NEXT_BLKP(ptr)), PACK(size, 1));
+            PUT(HDRP(PREV_BLKP(ptr)), PACK(size, 1));
+            ptr = PREV_BLKP(ptr);
+            return ptr;
+        }
     }
-    ptr = PREV_BLKP(ptr);
-    return ptr;
+    return NULL;
 }
 
 /*
  * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
  */
 void *mm_realloc(void *ptr, size_t size) {
-    void *oldptr = ptr;
-    void *newptr;
-    size_t copySize;
-
-    newptr = mm_malloc(size);
-    if (newptr == NULL)
+    if (ptr == NULL)
+        return mm_malloc(size);
+    if (size == 0) {
+        mm_free(ptr);
         return NULL;
-    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    if (size < copySize)
-        copySize = size;
-    memcpy(newptr, oldptr, copySize);
-    mm_free(oldptr);
-    return newptr;
+    }
+
+    size_t newSize = getSize(size);
+    size_t oldsize = GET_SIZE(HDRP(ptr));
+    if (oldsize < newSize) {
+        char *new = realloc_coalesce(ptr, newSize);
+        if (new == NULL) { /* If there doesn't exist adjacent node */
+            new = mm_malloc(size);
+            memcpy(new, ptr, size);
+            mm_free(ptr);
+            return new;
+        }
+        if (new != ptr)
+            memcpy(new, ptr, size);
+        PUT(HDRP(new), PACK(GET_SIZE(HDRP(new)), 1));
+        PUT(FTRP(new), PACK(GET_SIZE(HDRP(new)), 1));
+        return new;
+    }
+
+    /* If reallocate size is smaller than existing one, use it. */
+    PUT(HDRP(ptr), PACK(GET_SIZE(HDRP(ptr)), 1));
+    PUT(FTRP(ptr), PACK(GET_SIZE(HDRP(ptr)), 1));
+    return ptr;
 }
