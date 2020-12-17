@@ -11,6 +11,8 @@
  * by using segregated free list among explicit free lists.
  * In the segregated free list, nodes are divided according to 
  * the number of powers of the block size.
+ * Also, each node in this list is sorted in ascending order 
+ * according to the size of the block.
  */
 #include "mm.h"
 
@@ -69,11 +71,13 @@
 #define SET_PTR(p, ptr) (*(unsigned int *)(p) = (unsigned int)(ptr))
 
 /* Segregated list */
-void *segregated_free_list[LIST_SIZE];
+void **segregated_free_list;
+
+#define GET_LIST(i) (*(segregated_free_list + i))
 
 char *heap_start;
 
-static void *extend_heap(size_t size);
+static void *extend_heap(size_t);
 static void *coalesce(void *);
 static void *place(void *, size_t);
 static void pushNode(void *, size_t);
@@ -122,7 +126,7 @@ static void pushNode(void *ptr, size_t size) {
     }
 
     /* Find position in set of list */
-    void *preNode = segregated_free_list[i];
+    void *preNode = GET_LIST(i);
     void *node = NULL;
     while ((preNode != NULL) && (size > GET_SIZE(HDRP(preNode)))) {
         node = preNode;
@@ -139,7 +143,7 @@ static void pushNode(void *ptr, size_t size) {
         SET_PTR(GET_PREV(node), ptr);
     } else {
         SET_PTR(GET_PREV(ptr), preNode);
-        segregated_free_list[i] = ptr;
+        GET_LIST(i) = ptr;
     }
 
     return;
@@ -159,7 +163,7 @@ static void popNode(void *ptr) {
             size >>= 1;
         }
 
-        segregated_free_list[i] = PREV_NODE(ptr);
+        GET_LIST(i) = PREV_NODE(ptr);
     }
 
     return;
@@ -228,9 +232,11 @@ static void *place(void *ptr, size_t size) {
  */
 int mm_init(void) {
     /* Initialize segregated list */
+    if ((segregated_free_list = mem_sbrk(LIST_SIZE * WSIZE)) == (void *)-1)
+        return -1;
     int i;
     for (i = 0; i < LIST_SIZE; i++) {
-        segregated_free_list[i] = NULL;
+        GET_LIST(i) = NULL;
     }
 
     /* Create the initial empty heap */
@@ -263,9 +269,10 @@ void *mm_malloc(size_t size) {
     int i = 0;
     size_t temp = size;
     for (; i < LIST_SIZE; i++) {
-        if (segregated_free_list[i] != NULL && temp <= 1) { /* Find fit node set in list */
-            node = segregated_free_list[i];
-            while (node != NULL && size > GET_SIZE(HDRP(node))) { /* If there is no node size to allocate, pass to next set */
+        if (GET_LIST(i) != NULL && temp <= 1) { /* Find fit node set in list */
+            node = GET_LIST(i);
+            /* If there is no node size to allocate, pass to next set */
+            while (node != NULL && size > GET_SIZE(HDRP(node))) {
                 node = PREV_NODE(node);
             }
             if (node != NULL)
@@ -278,7 +285,8 @@ void *mm_malloc(size_t size) {
     if ((node = extend_heap(MAX(size, CHUNKSIZE))) == NULL)
         return NULL;
 
-    // mm_check();
+    if (0)
+        mm_check();
 
     return place(node, size);
 }
@@ -379,7 +387,7 @@ static void check_mark_free() {
     int i = 0;
     for (; i < LIST_SIZE; i++) {
         void *ptr;
-        if ((ptr = segregated_free_list[i]) != NULL)
+        if ((ptr = GET_LIST(i)) != NULL)
             while (ptr != NULL) {
                 if (GET_ALLOC(HDRP(ptr))) {
                     printf("There is a block which marked as allocated in free list.\n");
@@ -404,7 +412,7 @@ static void check_contiguous_free() {
                 size >>= 1;
             }
 
-            void *node = segregated_free_list[i];
+            void *node = GET_LIST(i);
             while (node != NULL) {
                 if (node == NEXT_BLKP(ptr)) {
                     printf("There are contiguous free blocks in free list.\n");
@@ -421,7 +429,7 @@ static void check_contiguous_free() {
                 size >>= 1;
             }
 
-            void *node = segregated_free_list[i];
+            void *node = GET_LIST(i);
             while (node != NULL) {
                 if (node == PREV_BLKP(ptr)) {
                     printf("There are contiguous free blocks in free list.\n");
@@ -448,7 +456,7 @@ static void check_free_in_list() {
                 size >>= 1;
             }
 
-            void *node = segregated_free_list[i];
+            void *node = GET_LIST(i);
             while (node != NULL) {
                 if (node == ptr)
                     return;
@@ -465,7 +473,7 @@ static void check_free_in_list() {
 static void check_valid_free() {
     int i = 0;
     for (; i < LIST_SIZE; i++) {
-        void *node = segregated_free_list[i];
+        void *node = GET_LIST(i);
         while (node != NULL) {
             if (GET_ALLOC(HDRP(GET_NEXT(node))) || GET_ALLOC(HDRP(GET_PREV(node)))) {
                 printf("There is a free block which is not in free list.\n");
