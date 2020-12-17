@@ -7,8 +7,10 @@
  * footers.  Blocks are never coalesced or reused. Realloc is
  * implemented directly using mm_malloc and mm_free.
  *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
+ * Implemented malloc(), free(), and realloc()
+ * by using segregated free list among explicit free lists.
+ * In the segregated free list, nodes are divided according to 
+ * the number of powers of the block size.
  */
 #include "mm.h"
 
@@ -69,6 +71,8 @@
 /* Segregated list */
 void *segregated_free_list[LIST_SIZE];
 
+char *heap_start;
+
 static void *extend_heap(size_t size);
 static void *coalesce(void *);
 static void *place(void *, size_t);
@@ -76,6 +80,13 @@ static void pushNode(void *, size_t);
 static void popNode(void *);
 inline size_t getSize(size_t);
 static void *realloc_coalesce(void *, size_t);
+static void check_mark_free();
+static void check_contiguous_free();
+static void check_free_in_list();
+static void check_valid_free();
+static void check_block_overlap();
+static void check_heap_address();
+static void mm_check();
 
 /* Get size which append offset */
 inline size_t getSize(size_t size) {
@@ -216,8 +227,6 @@ static void *place(void *ptr, size_t size) {
  * mm_init - initialize the malloc package.
  */
 int mm_init(void) {
-    char *heap_start;
-
     /* Initialize segregated list */
     int i;
     for (i = 0; i < LIST_SIZE; i++) {
@@ -269,6 +278,8 @@ void *mm_malloc(size_t size) {
     if ((node = extend_heap(MAX(size, CHUNKSIZE))) == NULL)
         return NULL;
 
+    // mm_check();
+
     return place(node, size);
 }
 
@@ -283,6 +294,9 @@ void mm_free(void *ptr) {
     pushNode(ptr, size);
 
     coalesce(ptr);
+
+    // mm_check();
+
     return;
 }
 
@@ -354,5 +368,148 @@ void *mm_realloc(void *ptr, size_t size) {
     /* If reallocate size is smaller than existing one, use it. */
     PUT(HDRP(ptr), PACK(GET_SIZE(HDRP(ptr)), 1));
     PUT(FTRP(ptr), PACK(GET_SIZE(HDRP(ptr)), 1));
+
+    // mm_check();
+
     return ptr;
+}
+
+/* Is every block in the free list marked as free? */
+static void check_mark_free() {
+    int i = 0;
+    for (; i < LIST_SIZE; i++) {
+        void *ptr;
+        if ((ptr = segregated_free_list[i]) != NULL)
+            while (ptr != NULL) {
+                if (GET_ALLOC(HDRP(ptr))) {
+                    printf("There is a block which marked as allocated in free list.\n");
+                    assert(0);
+                }
+                ptr = NEXT_NODE(ptr);
+            }
+    }
+}
+
+/* Are there any contiguous free blocks that somehow escaped coalescing? */
+static void check_contiguous_free() {
+    char *ptr = heap_start;
+
+    while (GET_SIZE(HDRP(ptr)) > 0) {
+        if (!GET_ALLOC(HDRP(ptr)) && !GET_ALLOC(HDRP(NEXT_BLKP(ptr)))) {
+            size_t size = GET_SIZE(HDRP(NEXT_BLKP(ptr)));
+            int i = 0;
+            for (; i < LIST_SIZE; i++) {
+                if (size <= 1)
+                    break;
+                size >>= 1;
+            }
+
+            void *node = segregated_free_list[i];
+            while (node != NULL) {
+                if (node == NEXT_BLKP(ptr)) {
+                    printf("There are contiguous free blocks in free list.\n");
+                    assert(0);
+                }
+                node = NEXT_NODE(node);
+            }
+        } else if (!GET_ALLOC(HDRP(ptr)) && !GET_ALLOC(HDRP(PREV_BLKP(ptr)))) {
+            size_t size = GET_SIZE(HDRP(PREV_BLKP(ptr)));
+            int i = 0;
+            for (; i < LIST_SIZE; i++) {
+                if (size <= 1)
+                    break;
+                size >>= 1;
+            }
+
+            void *node = segregated_free_list[i];
+            while (node != NULL) {
+                if (node == PREV_BLKP(ptr)) {
+                    printf("There are contiguous free blocks in free list.\n");
+                    assert(0);
+                }
+                node = NEXT_NODE(node);
+            }
+        }
+        ptr = NEXT_BLKP(ptr);
+    }
+}
+
+/* Is every free block actually in the free list? */
+static void check_free_in_list() {
+    char *ptr = heap_start;
+
+    while (ptr != NULL && GET_SIZE(HDRP(ptr)) > 0) {
+        if (!GET_ALLOC(HDRP(ptr))) {
+            size_t size = GET_SIZE(HDRP(ptr));
+            int i = 0;
+            for (; i < LIST_SIZE; i++) {
+                if (size <= 1)
+                    break;
+                size >>= 1;
+            }
+
+            void *node = segregated_free_list[i];
+            while (node != NULL) {
+                if (node == ptr)
+                    return;
+                node = NEXT_NODE(node);
+            }
+            printf("There is a free block which is not in free list.\n");
+            assert(0);
+        }
+        ptr = NEXT_BLKP(ptr);
+    }
+}
+
+/* Do the pointers in the free list point to valid free blocks? */
+static void check_valid_free() {
+    int i = 0;
+    for (; i < LIST_SIZE; i++) {
+        void *node = segregated_free_list[i];
+        while (node != NULL) {
+            if (GET_ALLOC(HDRP(GET_NEXT(node))) || GET_ALLOC(HDRP(GET_PREV(node)))) {
+                printf("There is a free block which is not in free list.\n");
+                assert(0);
+            }
+            node = NEXT_NODE(node);
+        }
+    }
+}
+
+/* Do any allocated blocks overlap? */
+static void check_block_overlap() {
+    void *ptr = heap_start;
+
+    while (GET_SIZE(ptr) > 0) {
+        if (GET_SIZE(HDRP(ptr)) != GET_SIZE(FTRP(ptr))) {
+            printf("There are overlaped blocks.\n");
+            assert(0);
+        }
+        ptr = NEXT_BLKP(ptr);
+    }
+}
+
+/* Do the pointers in a heap block point to valid heap addresses? */
+static void check_heap_address() {
+    void *heap_lo = mem_heap_lo();
+    void *heap_hi = mem_heap_hi();
+    void *ptr = heap_start;
+
+    while (GET_SIZE(ptr) > 0) {
+        if (!(heap_lo <= ptr && ptr <= heap_hi)) {
+            printf("There is a block which do not have valid heap address.\n");
+            assert(0);
+        }
+        ptr = NEXT_BLKP(ptr);
+    }
+}
+
+/* Heap Consistency Checker */
+static void mm_check() {
+    check_mark_free();
+    check_contiguous_free();
+    check_free_in_list();
+    check_valid_free();
+    check_block_overlap();
+    check_heap_address();
 }
