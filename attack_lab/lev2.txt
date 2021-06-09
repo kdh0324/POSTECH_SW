@@ -1,0 +1,10 @@
+
+lev2.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <.text>:
+   0:	68 6d 19 40 00       	pushq  $0x40196d
+   5:	48 c7 c7 5e 76 25 6b 	mov    $0x6b25765e,%rdi
+   c:	c3                   	retq   
